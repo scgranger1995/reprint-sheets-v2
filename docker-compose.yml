@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    container_name: reprint-sheets
+    ports:
+      - "3001:3001"
+    volumes:
+      - db-data:/app/prisma
+      - uploads-data:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  uploads-data:
