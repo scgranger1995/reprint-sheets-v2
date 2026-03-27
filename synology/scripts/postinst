@@ -1,0 +1,58 @@
+#!/bin/sh
+
+# Post-installation script for Reprint Sheets
+# Runs after package files are extracted to SYNOPKG_PKGDEST
+
+PKG_DIR="${SYNOPKG_PKGDEST}"
+DATA_DIR="${SYNOPKG_PKGVAR:-/var/packages/reprint-sheets/var}"
+
+# Find Node.js — check common Synology locations
+find_node() {
+    for p in \
+        /usr/local/bin/node \
+        /usr/local/lib/nodejs/bin/node \
+        /volume1/@appstore/Node.js_v22/usr/local/bin/node \
+        /volume1/@appstore/Node.js_v20/usr/local/bin/node \
+        /volume1/@appstore/Node.js_v18/usr/local/bin/node \
+        /volume1/@appstore/Node.js_v16/usr/local/bin/node
+    do
+        if [ -x "$p" ]; then
+            echo "$p"
+            return 0
+        fi
+    done
+    # Try PATH as last resort
+    command -v node 2>/dev/null && return 0
+    return 1
+}
+
+NODE_BIN=$(find_node)
+if [ -z "$NODE_BIN" ]; then
+    echo "ERROR: Node.js not found. Install Node.js from Package Center first."
+    exit 1
+fi
+
+NODE_DIR=$(dirname "$NODE_BIN")
+export PATH="$NODE_DIR:$PATH"
+
+echo "Using Node.js: $NODE_BIN ($(${NODE_BIN} -v))"
+
+# Create persistent data directories
+mkdir -p "$DATA_DIR/prisma"
+mkdir -p "$DATA_DIR/uploads"
+
+# Symlink uploads to persistent storage
+rm -rf "$PKG_DIR/uploads" 2>/dev/null
+ln -sf "$DATA_DIR/uploads" "$PKG_DIR/uploads"
+
+# Initialize / migrate database in persistent storage
+cd "$PKG_DIR"
+export DATABASE_URL="file:${DATA_DIR}/prisma/dev.db"
+export DATABASE_PATH="${DATA_DIR}/prisma/dev.db"
+
+npx prisma db push --skip-generate --accept-data-loss 2>&1 || true
+
+echo "Reprint Sheets installed successfully."
+echo "Database: $DATA_DIR/prisma/dev.db"
+echo "Uploads:  $DATA_DIR/uploads/"
+exit 0

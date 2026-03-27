@@ -1,0 +1,97 @@
+#!/bin/sh
+
+# Service start/stop/status script for Synology Package Center
+
+PKG_DIR="${SYNOPKG_PKGDEST:-/var/packages/reprint-sheets/target}"
+DATA_DIR="${SYNOPKG_PKGVAR:-/var/packages/reprint-sheets/var}"
+PID_FILE="$DATA_DIR/reprint-sheets.pid"
+LOG_FILE="$DATA_DIR/reprint-sheets.log"
+
+# Find Node.js
+find_node() {
+    for p in \
+        /usr/local/bin/node \
+        /usr/local/lib/nodejs/bin/node \
+        /volume1/@appstore/Node.js_v22/usr/local/bin/node \
+        /volume1/@appstore/Node.js_v20/usr/local/bin/node \
+        /volume1/@appstore/Node.js_v18/usr/local/bin/node \
+        /volume1/@appstore/Node.js_v16/usr/local/bin/node
+    do
+        if [ -x "$p" ]; then
+            echo "$p"
+            return 0
+        fi
+    done
+    command -v node 2>/dev/null && return 0
+    return 1
+}
+
+start_daemon() {
+    NODE_BIN=$(find_node)
+    if [ -z "$NODE_BIN" ]; then
+        echo "ERROR: Node.js not found" >> "$LOG_FILE"
+        return 1
+    fi
+
+    NODE_DIR=$(dirname "$NODE_BIN")
+    export PATH="$NODE_DIR:$PATH"
+    export DATABASE_PATH="$DATA_DIR/prisma/dev.db"
+    export DATABASE_URL="file:$DATA_DIR/prisma/dev.db"
+    export NODE_ENV="production"
+
+    cd "$PKG_DIR"
+
+    # Ensure database schema is up to date
+    npx prisma db push --skip-generate --accept-data-loss >> "$LOG_FILE" 2>&1 || true
+
+    # Start Next.js
+    nohup "$NODE_BIN" node_modules/next/dist/bin/next start -p 3001 -H 0.0.0.0 >> "$LOG_FILE" 2>&1 &
+    echo $! > "$PID_FILE"
+    echo "Started Reprint Sheets (PID: $(cat $PID_FILE))"
+}
+
+stop_daemon() {
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if kill -0 "$PID" 2>/dev/null; then
+            kill "$PID" 2>/dev/null
+            # Give it a moment then kill children
+            sleep 1
+            pkill -P "$PID" 2>/dev/null
+            echo "Stopped Reprint Sheets (PID: $PID)"
+        fi
+        rm -f "$PID_FILE"
+    fi
+}
+
+daemon_status() {
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if kill -0 "$PID" 2>/dev/null; then
+            return 0  # running
+        fi
+        rm -f "$PID_FILE"
+    fi
+    return 1  # not running
+}
+
+case "$1" in
+    start)
+        start_daemon
+        ;;
+    stop)
+        stop_daemon
+        ;;
+    status)
+        daemon_status
+        ;;
+    log)
+        echo "$LOG_FILE"
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|status|log}"
+        exit 1
+        ;;
+esac
+
+exit $?

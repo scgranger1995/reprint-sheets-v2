@@ -1,0 +1,76 @@
+name: Build Synology Package
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. 1.0.0)'
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64]
+        # Add aarch64 here if your NAS is ARM-based
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "ver=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "ver=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          else
+            echo "ver=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Build app
+        run: npm run build
+
+      - name: Remove dev dependencies
+        run: npm prune --omit=dev
+
+      - name: Clean node_modules (reduce size)
+        run: |
+          find node_modules -name "*.d.ts" -delete 2>/dev/null || true
+          find node_modules -name "*.d.mts" -delete 2>/dev/null || true
+          find node_modules -name "*.map" -delete 2>/dev/null || true
+          find node_modules -name "CHANGELOG*" -delete 2>/dev/null || true
+          find node_modules -type d -name "__tests__" -exec rm -rf {} + 2>/dev/null || true
+          find node_modules -type d -name "test" -prune -exec rm -rf {} + 2>/dev/null || true
+          find node_modules -type d -name "docs" -prune -exec rm -rf {} + 2>/dev/null || true
+
+      - name: Build SPK
+        run: |
+          chmod +x synology/build-spk.sh
+          cd synology
+          ./build-spk.sh "${{ steps.version.outputs.ver }}" "${{ matrix.arch }}"
+
+      - name: Upload SPK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reprint-sheets-${{ steps.version.outputs.ver }}-${{ matrix.arch }}.spk
+          path: synology/reprint-sheets-${{ steps.version.outputs.ver }}-${{ matrix.arch }}.spk
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: synology/reprint-sheets-${{ steps.version.outputs.ver }}-${{ matrix.arch }}.spk

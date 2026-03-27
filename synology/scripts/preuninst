@@ -1,0 +1,19 @@
+#!/bin/sh
+
+# Pre-uninstallation script
+# Data in /var/packages/reprint-sheets/var/ is preserved by DSM
+# unless the user explicitly chooses to remove data
+
+echo "Stopping Reprint Sheets..."
+
+PID_FILE="/var/packages/reprint-sheets/var/reprint-sheets.pid"
+
+if [ -f "$PID_FILE" ]; then
+    PID=$(cat "$PID_FILE")
+    kill "$PID" 2>/dev/null
+    # Kill child processes too
+    pkill -P "$PID" 2>/dev/null
+    rm -f "$PID_FILE"
+fi
+
+exit 0

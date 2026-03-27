@@ -56,3 +56,6 @@ uploads/*
 
 # update status
 update-status.json
+
+# synology build artifacts
+synology/*.spk
